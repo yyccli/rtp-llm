@@ -41,11 +41,32 @@ bool CustomAllReduceComm::checkAllReduceAvailable(size_t elts_total_num, DataTyp
     return false;
 }
 
+bool CustomAllReduceComm::checkAllGatherAvailable() {
+    char* disable_custom_ag_str = std::getenv("ROCM_DISABLE_CUSTOM_AG");
+    bool  disable_custom_ag     = disable_custom_ag_str != nullptr && std::string(disable_custom_ag_str) == "1";
+    if (disable_custom_ag) {
+        RTP_LLM_LOG_INFO("Disable custom ag since ROCM_DISABLE_CUSTOM_AG is set");
+        return false;
+    }
+
+    return true;
+}
+
 void CustomAllReduceComm::allReduce(torch::Tensor& input_tensor, torch::Tensor& output_tensor) {
+    std::optional<torch::Tensor> reg_buffer = std::nullopt;
     if (at::hip::currentStreamCaptureStatusMayInitCtx() != at::hip::CaptureStatus::None) {
-        aiter::all_reduce_reg(fa_, input_tensor, output_tensor, false);
+        aiter::all_reduce(fa_, input_tensor, output_tensor, false, reg_buffer);
     } else {
-        aiter::all_reduce_unreg(fa_, input_tensor, buffer_, output_tensor);
+        reg_buffer = buffer_;
+        aiter::all_reduce(fa_, input_tensor, output_tensor, false, reg_buffer);
+    }
+}
+
+void CustomAllReduceComm::allGather(torch::Tensor& input_tensor, torch::Tensor& output_tensor) {
+    if (at::hip::currentStreamCaptureStatusMayInitCtx() != at::hip::CaptureStatus::None) {
+        aiter::all_gather_reg(fa_, input_tensor, output_tensor);
+    } else {
+        aiter::all_gather_unreg(fa_, input_tensor, buffer_, output_tensor);
     }
 }
 
@@ -149,7 +170,7 @@ bool CustomAllReduceComm::shouldCustomAR(const std::vector<size_t>& tp_ranks, si
     size_t local_world_size = rocm::getDeviceCount();
 
     // 1. check whether all ranks are on same nodes
-    if (world_size != local_world_size) {
+    if (world_size > local_world_size) {
         RTP_LLM_LOG_INFO(
             "Disable custom ar since TP is performanced on multi nodes, world_size=%d, local_world_size=%d",
             world_size,

@@ -26,7 +26,12 @@ public:
 
     void allReduce(torch::Tensor& input_tensor, torch::Tensor& output_tensor);
 
+    // NOTE(liyangcheng.lyc): the implementation of custom all gather is placed together with custom all reduce
+    void allGather(torch::Tensor& input_tensor, torch::Tensor& output_tensor);
+
     bool checkAllReduceAvailable(size_t elts_total_num, DataType data_type, size_t world_size);
+
+    bool checkAllGatherAvailable();
 
     static bool shouldCustomAR(const std::vector<size_t>& tp_ranks, size_t rank);
 
